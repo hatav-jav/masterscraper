@@ -22,12 +22,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware simple para autenticación por header."""
     
     async def dispatch(self, request: Request, call_next):
-        # Permitir acceso a rutas públicas si es necesario
-        if request.url.path.startswith("/docs") or request.url.path.startswith("/openapi.json"):
+        # Permitir acceso a rutas públicas (sin autenticación)
+        public_paths = ["/", "/docs", "/openapi.json", "/redoc"]
+        if any(request.url.path.startswith(path) for path in public_paths):
             response = await call_next(request)
             return response
         
-        # Verificar API Key
+        # Verificar API Key para rutas protegidas
         if API_SECRET:
             try:
                 verify_api_key(request)

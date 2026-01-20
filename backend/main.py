@@ -41,7 +41,8 @@ def startup_event():
     init_db()
 
 @app.get("/")
-def root():
+async def root():
+    """Endpoint raíz - información de la API."""
     return {"message": "Master Scraper API", "version": "1.0.0"}
 
 @app.post("/scrape/{source}")

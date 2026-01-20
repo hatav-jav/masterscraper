@@ -21,12 +21,30 @@ Master Scraper/
 
 ## Setup
 
-### Verificación Inicial
+### Configuración de Variables de Entorno
 
-Ejecuta el script de verificación para asegurarte de que todo está en orden:
-```bash
-python check-setup.py
+**Opción 1: Script automático (recomendado)**
+```powershell
+.\setup-env.ps1
 ```
+
+**Opción 2: Manual**
+- Crear archivo `.env` en la raíz con las variables del backend
+- Crear archivo `frontend/.env.local` con las variables del frontend
+- Ver `SETUP.md` para detalles completos
+
+### Verificación del Setup
+
+Ejecuta el script de verificación:
+```bash
+python test-setup.py
+```
+
+Este script verifica:
+- ✅ Archivos del proyecto
+- ✅ Variables de entorno configuradas
+- ✅ Dependencias instaladas
+- ✅ Coincidencia de API keys
 
 ### Backend
 
@@ -84,33 +102,40 @@ python check-setup.py
 
 5. Abrir en navegador: http://localhost:3000
 
-## Configuración de GitHub
+## Variables de Entorno
 
-1. **Inicializar Git** (si no está inicializado):
-   ```bash
-   git init
-   git branch -M main
-   ```
+**Backend** - Archivo `.env` en la raíz (ya creado como template):
+```env
+API_SECRET=tu_secreto_aqui
+OPENAI_API_KEY=sk-...
+EMAIL_FROM=tu_email@gmail.com
+EMAIL_TO=destino@gmail.com
+EMAIL_PASSWORD=tu_app_password
+DB_PATH=data/master_scraper.db
+```
 
-2. **Crear repositorio en GitHub** (público o privado) sin inicializar con README
+**Frontend** - Archivo `frontend/.env.local` (ya creado como template):
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_KEY=tu_secreto_aqui
+```
 
-3. **Conectar repositorio local con remoto**:
-   ```bash
-   git remote add origin https://github.com/[tu-usuario]/[nombre-repo].git
-   ```
+**⚠️ IMPORTANTE**: 
+- Edita los archivos `.env` y `frontend/.env.local` con tus valores reales
+- Estos archivos NO se suben a GitHub (están en .gitignore)
+- El `NEXT_PUBLIC_API_KEY` debe ser igual que `API_SECRET` en `.env`
 
-4. **Agregar archivos y hacer commit**:
-   ```bash
-   git add .
-   git commit -m "chore: configuración inicial del proyecto"
-   ```
+## Versionado y Git
 
-5. **Push al repositorio**:
-   ```bash
-   git push -u origin main
-   ```
+El proyecto está conectado a GitHub: https://github.com/hatav-jav/masterscraper
 
-**Nota**: Asegúrate de crear el archivo `.env` con tus credenciales antes de hacer commit (está en .gitignore y no se subirá).
+**Ver `GIT_WORKFLOW.md` para guía completa de versionado.**
+
+**Resumen rápido:**
+- Hacer commits frecuentes en `main` para cambios pequeños
+- Crear branches (`feature/nombre`) para cambios grandes
+- Hacer push regularmente después de commits importantes
+- Usar mensajes descriptivos: `feat(scope): descripción`
 
 ## Endpoints de la API
 
