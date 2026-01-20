@@ -24,4 +24,3 @@ Write-Host "`nPróximos pasos:" -ForegroundColor Yellow
 Write-Host "1. Crear repositorio en GitHub" -ForegroundColor White
 Write-Host "2. Ejecutar: git remote add origin https://github.com/[tu-usuario]/[nombre-repo].git" -ForegroundColor White
 Write-Host "3. Ejecutar: git push -u origin main" -ForegroundColor White
-

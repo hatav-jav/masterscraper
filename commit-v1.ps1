@@ -40,4 +40,3 @@ if ($LASTEXITCODE -eq 0) {
 } else {
     Write-Host "Error al crear commit" -ForegroundColor Red
 }
-

@@ -2,4 +2,3 @@
 playwright==1.40.0
 # Para instalar: .\venv\Scripts\python.exe -m pip install playwright
 # Luego: playwright install
-

@@ -107,4 +107,3 @@ npm run dev
 - El scraper SEIA espera 15 segundos antes de la primera request (configurado así para respetar el servidor)
 - La base de datos se crea automáticamente al ejecutar el backend
 - Sin API_SECRET configurado, la API funciona sin autenticación (solo para desarrollo)
-

@@ -20,4 +20,3 @@ Write-Host "Presiona Ctrl+C para detener" -ForegroundColor Yellow
 Write-Host ""
 
 npm run dev
-

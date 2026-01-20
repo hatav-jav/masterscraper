@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from backend.database import init_db, save_leads, create_run, update_run, get_latest_leads, get_all_leads_for_report
+from backend.database import init_db, save_leads, create_run, update_run, get_latest_leads, get_all_leads_for_report, get_recent_runs
 from backend.auth import AuthMiddleware
 from backend.report import generate_report_with_ai, send_email_report
 from backend.config import EMAIL_TO
@@ -84,6 +84,63 @@ async def scrape_source(source: str):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error al ejecutar scraper: {error_detail}")
 
+
+@app.post("/scrape-all")
+async def scrape_all():
+    """
+    Ejecuta todos los scrapers disponibles.
+    """
+    results = []
+    total_leads_all = 0
+    errors = []
+    
+    for source, scraper_func in SCRAPERS.items():
+        try:
+            # Crear registro de run
+            run_id = create_run(source)
+            
+            # Ejecutar scraper
+            leads = scraper_func()
+            
+            # Guardar leads en BD
+            total_leads = save_leads(source, leads)
+            total_leads_all += total_leads
+            
+            # Actualizar run
+            update_run(run_id, 'completed', total_leads)
+            
+            results.append({
+                "source": source,
+                "status": "success",
+                "total_leads": total_leads,
+                "run_id": run_id
+            })
+        except Exception as e:
+            try:
+                update_run(run_id, 'error', 0)
+            except:
+                pass
+            
+            error_detail = str(e)
+            traceback.print_exc()
+            errors.append({
+                "source": source,
+                "error": error_detail
+            })
+            results.append({
+                "source": source,
+                "status": "error",
+                "error": error_detail
+            })
+    
+    return {
+        "status": "success" if not errors else "partial",
+        "results": results,
+        "total_leads": total_leads_all,
+        "errors": errors
+    }
+
+
 @app.post("/report")
 async def generate_report():
     """
@@ -123,8 +180,11 @@ async def generate_report():
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error al generar reporte: {error_detail}")
 
+
 @app.get("/leads")
-async def get_leads(limit: int = 100):
+async def get_leads(
+    limit: int = Query(500, ge=1, le=1000)
+):
     """
     Obtiene los leads recientes.
     """
@@ -137,7 +197,22 @@ async def get_leads(limit: int = 100):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener leads: {str(e)}")
 
+
+@app.get("/runs")
+async def get_runs(limit: int = Query(10, ge=1, le=100)):
+    """
+    Obtiene el historial de ejecuciones de scrapers.
+    """
+    try:
+        runs = get_recent_runs(limit)
+        return {
+            "runs": runs,
+            "total": len(runs)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener runs: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

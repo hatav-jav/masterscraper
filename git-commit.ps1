@@ -37,4 +37,3 @@ if (Test-Path "backend/main.py") {
     Write-Host "❌ No estás en el directorio correcto del proyecto" -ForegroundColor Red
     Write-Host "Por favor, navega al directorio Master Scraper y ejecuta este script nuevamente" -ForegroundColor Yellow
 }
-

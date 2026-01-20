@@ -159,3 +159,29 @@ def get_all_leads_for_report() -> List[Dict]:
     """Obtiene todos los leads recientes para generar reporte."""
     return get_latest_leads(limit=500)
 
+
+
+def get_recent_runs(limit: int = 10) -> List[Dict]:
+    """Obtiene el historial reciente de ejecuciones de scrapers."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, source, status, total_leads, started_at, completed_at
+        FROM runs
+        ORDER BY started_at DESC
+        LIMIT ?
+    ''', (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    runs = []
+    for row in rows:
+        runs.append({
+            'id': row['id'],
+            'source': row['source'],
+            'status': row['status'],
+            'total_leads': row['total_leads'],
+            'started_at': row['started_at'],
+            'completed_at': row['completed_at']
+        })
+    return runs

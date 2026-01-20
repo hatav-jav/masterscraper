@@ -24,4 +24,3 @@ echo "Próximos pasos:"
 echo "1. Crear repositorio en GitHub"
 echo "2. Ejecutar: git remote add origin https://github.com/[tu-usuario]/[nombre-repo].git"
 echo "3. Ejecutar: git push -u origin main"
-

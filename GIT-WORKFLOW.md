@@ -145,4 +145,3 @@ git branch
 # Ver diferencias entre branches
 git diff main..feature/nombre
 ```
-

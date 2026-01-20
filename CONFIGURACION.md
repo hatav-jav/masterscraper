@@ -120,4 +120,3 @@ Después de configurar, prueba que todo funciona:
 ### Error al enviar email
 - Verifica que `EMAIL_PASSWORD` es un App Password de Gmail, no tu contraseña normal
 - Verifica que la verificación en dos pasos está activada en tu cuenta de Google
-
