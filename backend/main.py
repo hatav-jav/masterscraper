@@ -1,7 +1,13 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from backend.database import init_db, save_leads, create_run, update_run, get_latest_leads, get_all_leads_for_report, get_recent_runs, get_existing_seia_codes
+from backend.database import (
+    init_db, save_leads, create_run, update_run, get_latest_leads, 
+    get_all_leads_for_report, get_recent_runs, get_existing_seia_projects,
+    update_lead_estado, save_estado_change, get_recent_estado_changes,
+    get_all_leads_for_markdown
+)
+from datetime import datetime
 from backend.auth import AuthMiddleware
 from backend.report import generate_report_with_ai, send_email_report
 from backend.config import EMAIL_TO
@@ -74,28 +80,55 @@ def run_scraper_thread(source: str, run_id: int):
         # Ejecutar scraper con parámetros adicionales según el tipo
         scraper_func = SCRAPERS[source]
         
+        estado_changes_count = 0
+        
         if source == 'seia':
-            # Obtener códigos existentes para evitar duplicados
-            existing_codes = get_existing_seia_codes()
-            print(f"📊 Encontrados {len(existing_codes)} proyectos SEIA existentes en BD")
-            leads = scraper_func(existing_codes=existing_codes, progress_callback=update_progress, cancel_callback=check_cancel)
+            # Obtener proyectos existentes con su estado actual
+            existing_projects = get_existing_seia_projects()
+            print(f"📊 Encontrados {len(existing_projects)} proyectos SEIA existentes en BD")
+            
+            # El scraper SEIA retorna {new_leads: [...], estado_changes: [...]}
+            result = scraper_func(existing_projects=existing_projects, progress_callback=update_progress, cancel_callback=check_cancel)
+            leads = result.get('new_leads', [])
+            estado_changes = result.get('estado_changes', [])
+            
+            # Procesar cambios de estado
+            for change in estado_changes:
+                # Actualizar el lead existente con el nuevo estado
+                update_lead_estado(
+                    change['lead_id'],
+                    change['estado_nuevo'],
+                    change['raw_data']
+                )
+                # Registrar el cambio
+                save_estado_change(
+                    change['lead_id'],
+                    change['codigo_seia'],
+                    change['project_name'],
+                    change['estado_anterior'],
+                    change['estado_nuevo']
+                )
+            
+            estado_changes_count = len(estado_changes)
+            if estado_changes_count > 0:
+                print(f"🔄 Se detectaron {estado_changes_count} cambios de estado")
         else:
             leads = scraper_func()
         
         # Verificar si fue cancelado
         if scraper_cancel.get(source, False):
-            update_run(run_id, 'cancelled', len(leads))
+            update_run(run_id, 'cancelled', len(leads) if isinstance(leads, list) else 0)
             scraper_progress[source] = {"percent": 0, "message": "Cancelado"}
             scraper_results[source] = {
                 "status": "cancelled",
                 "source": source,
-                "total_leads": len(leads),
+                "total_leads": len(leads) if isinstance(leads, list) else 0,
                 "run_id": run_id
             }
             return
         
-        # Guardar leads en BD
-        total_leads = save_leads(source, leads)
+        # Guardar leads nuevos en BD
+        total_leads = save_leads(source, leads) if leads else 0
         
         # Actualizar run
         update_run(run_id, 'completed', total_leads)
@@ -107,6 +140,7 @@ def run_scraper_thread(source: str, run_id: int):
             "status": "success",
             "source": source,
             "total_leads": total_leads,
+            "estado_changes": estado_changes_count,
             "run_id": run_id
         }
     except Exception as e:
@@ -314,6 +348,146 @@ async def cancel_scrape(source: str):
     global scraper_cancel
     scraper_cancel[source] = True
     return {"status": "cancelled", "source": source}
+
+
+@app.get("/estado-changes")
+async def get_estado_changes(limit: int = Query(20, ge=1, le=100)):
+    """
+    Obtiene los cambios de estado recientes de proyectos SEIA.
+    """
+    try:
+        changes = get_recent_estado_changes(limit)
+        return {
+            "changes": changes,
+            "total": len(changes)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener cambios de estado: {str(e)}")
+
+
+@app.get("/export/markdown")
+async def export_markdown():
+    """
+    Genera y retorna un reporte completo en formato Markdown para análisis con ChatGPT.
+    """
+    try:
+        leads = get_all_leads_for_markdown()
+        estado_changes = get_recent_estado_changes(50)
+        
+        # Generar el contenido Markdown
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        md_content = f"""# Reporte Master Scraper
+**Generado:** {now}
+
+---
+
+## Resumen Ejecutivo
+
+- **Total de proyectos:** {len(leads)}
+- **Cambios de estado recientes:** {len(estado_changes)}
+
+"""
+        
+        # Sección de cambios de estado
+        if estado_changes:
+            md_content += """---
+
+## Cambios de Estado Recientes (Proyectos SEIA)
+
+| Proyecto | Estado Anterior | Estado Nuevo | Fecha Detección |
+|----------|-----------------|--------------|-----------------|
+"""
+            for change in estado_changes:
+                is_aprobado = "✅ " if change.get('is_aprobado') else ""
+                md_content += f"| {change['project_name'][:50]}... | {change['estado_anterior']} | {is_aprobado}{change['estado_nuevo']} | {change['detected_at']} |\n"
+            
+            md_content += "\n"
+        
+        # Agrupar leads por fuente
+        leads_by_source = {}
+        for lead in leads:
+            source = lead['source'].upper()
+            if source not in leads_by_source:
+                leads_by_source[source] = []
+            leads_by_source[source].append(lead)
+        
+        # Generar sección para cada fuente
+        for source, source_leads in leads_by_source.items():
+            md_content += f"""---
+
+## Proyectos {source}
+
+**Total:** {len(source_leads)} proyectos
+
+"""
+            for i, lead in enumerate(source_leads, 1):
+                raw = lead.get('raw_data', {})
+                
+                md_content += f"""### {i}. {lead['project_name']}
+
+"""
+                
+                # Información básica
+                if raw.get('titular'):
+                    md_content += f"- **Titular:** {raw['titular']}\n"
+                if raw.get('region'):
+                    md_content += f"- **Región:** {raw['region']}"
+                    if raw.get('comuna'):
+                        md_content += f", {raw['comuna']}"
+                    md_content += "\n"
+                if raw.get('inversion_millones'):
+                    md_content += f"- **Inversión:** US$ {raw['inversion_millones']:,.2f} MM\n"
+                if raw.get('estado'):
+                    md_content += f"- **Estado:** {raw['estado']}\n"
+                if raw.get('industria'):
+                    md_content += f"- **Industria:** {raw['industria']}\n"
+                if lead.get('date'):
+                    md_content += f"- **Fecha Presentación:** {lead['date']}\n"
+                if raw.get('tipo'):
+                    md_content += f"- **Tipo:** {raw['tipo']}\n"
+                if raw.get('codigo_seia'):
+                    md_content += f"- **Código SEIA:** {raw['codigo_seia']}\n"
+                if raw.get('link_ficha'):
+                    md_content += f"- **Link SEIA:** {raw['link_ficha']}\n"
+                
+                # Descripción completa
+                if raw.get('descripcion_completa'):
+                    md_content += f"\n**Descripción del Proyecto:**\n\n{raw['descripcion_completa']}\n"
+                
+                md_content += "\n---\n\n"
+        
+        # Agregar instrucciones para ChatGPT al final
+        md_content += """
+## Instrucciones para Análisis
+
+Este reporte contiene información de proyectos de inversión en Chile. Por favor analiza:
+
+1. **Proyectos más relevantes** por monto de inversión
+2. **Distribución por industria** (minería, energía, infraestructura, etc.)
+3. **Distribución geográfica** por región
+4. **Cambios de estado** recientes, especialmente aprobaciones
+5. **Tendencias** y patrones observados
+6. **Oportunidades de negocio** potenciales
+
+Genera un informe ejecutivo con los hallazgos más importantes.
+"""
+        
+        # Retornar como archivo descargable
+        filename = f"master_scraper_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        
+        return StreamingResponse(
+            iter([md_content]),
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "text/markdown; charset=utf-8"
+            }
+        )
+        
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error al generar reporte: {str(e)}")
 
 
 if __name__ == "__main__":

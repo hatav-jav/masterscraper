@@ -38,6 +38,20 @@ def init_db():
         )
     ''')
     
+    # Tabla de cambios de estado
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS estado_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER,
+            codigo_seia TEXT,
+            project_name TEXT,
+            estado_anterior TEXT,
+            estado_nuevo TEXT,
+            detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            seen BOOLEAN DEFAULT 0
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -201,6 +215,159 @@ def get_existing_seia_codes() -> set:
                 pass
     
     return codes
+
+
+def get_existing_seia_projects() -> Dict[str, Dict]:
+    """
+    Obtiene los proyectos SEIA existentes con su estado actual.
+    Retorna dict: {codigo_seia: {lead_id, estado, project_name, raw_data}}
+    """
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, project_name, raw_data FROM leads WHERE LOWER(source) = 'seia'
+    ''')
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    projects = {}
+    for row in rows:
+        if row['raw_data']:
+            try:
+                data = json.loads(row['raw_data'])
+                codigo = data.get('codigo_seia')
+                if codigo:
+                    projects[str(codigo)] = {
+                        'lead_id': row['id'],
+                        'project_name': row['project_name'],
+                        'estado': data.get('estado', ''),
+                        'raw_data': data
+                    }
+            except:
+                pass
+    
+    return projects
+
+
+def update_lead_estado(lead_id: int, nuevo_estado: str, raw_data: dict):
+    """Actualiza el estado de un lead existente."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Actualizar raw_data con el nuevo estado
+    raw_data['estado'] = nuevo_estado
+    
+    # Actualizar también la descripción
+    description = f"Titular: {raw_data.get('titular', 'N/A')}. Región: {raw_data.get('region', 'N/A')}, {raw_data.get('comuna', 'N/A')}. Inversión: {raw_data.get('inversion_formato', 'N/A')}. Estado: {nuevo_estado}."
+    
+    cursor.execute('''
+        UPDATE leads
+        SET raw_data = ?, description = ?
+        WHERE id = ?
+    ''', (json.dumps(raw_data), description, lead_id))
+    
+    conn.commit()
+    conn.close()
+
+
+def save_estado_change(lead_id: int, codigo_seia: str, project_name: str, 
+                       estado_anterior: str, estado_nuevo: str):
+    """Guarda un registro de cambio de estado."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO estado_changes (lead_id, codigo_seia, project_name, estado_anterior, estado_nuevo)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (lead_id, codigo_seia, project_name, estado_anterior, estado_nuevo))
+    
+    conn.commit()
+    conn.close()
+
+
+def get_recent_estado_changes(limit: int = 20) -> List[Dict]:
+    """Obtiene los cambios de estado recientes."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, lead_id, codigo_seia, project_name, estado_anterior, estado_nuevo, detected_at, seen
+        FROM estado_changes
+        ORDER BY detected_at DESC
+        LIMIT ?
+    ''', (limit,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    changes = []
+    for row in rows:
+        changes.append({
+            'id': row['id'],
+            'lead_id': row['lead_id'],
+            'codigo_seia': row['codigo_seia'],
+            'project_name': row['project_name'],
+            'estado_anterior': row['estado_anterior'],
+            'estado_nuevo': row['estado_nuevo'],
+            'detected_at': row['detected_at'],
+            'seen': bool(row['seen']),
+            'is_aprobado': 'aprobado' in (row['estado_nuevo'] or '').lower()
+        })
+    
+    return changes
+
+
+def mark_estado_changes_seen(change_ids: List[int]):
+    """Marca cambios de estado como vistos."""
+    if not change_ids:
+        return
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    placeholders = ','.join('?' * len(change_ids))
+    cursor.execute(f'''
+        UPDATE estado_changes SET seen = 1 WHERE id IN ({placeholders})
+    ''', change_ids)
+    
+    conn.commit()
+    conn.close()
+
+
+def get_all_leads_for_markdown() -> List[Dict]:
+    """Obtiene todos los leads con información completa para exportar a markdown."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, source, project_name, date, sector, description, raw_data, created_at
+        FROM leads
+        ORDER BY source, created_at DESC
+    ''')
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    leads = []
+    for row in rows:
+        raw_data = json.loads(row['raw_data']) if row['raw_data'] else {}
+        leads.append({
+            'id': row['id'],
+            'source': row['source'],
+            'project_name': row['project_name'],
+            'date': row['date'],
+            'sector': row['sector'],
+            'description': row['description'],
+            'raw_data': raw_data,
+            'created_at': row['created_at']
+        })
+    
+    return leads
 
 def get_recent_runs(limit: int = 10) -> List[Dict]:
     """Obtiene el historial reciente de ejecuciones de scrapers."""

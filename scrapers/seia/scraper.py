@@ -287,28 +287,31 @@ def parse_listado_json(datos_json: dict) -> List[Dict[str, str]]:
     return proyectos
 
 
-def run_seia(obtener_descripcion: bool = True, existing_codes: set = None, progress_callback=None, cancel_callback=None) -> List[Dict]:
+def run_seia(obtener_descripcion: bool = True, existing_projects: dict = None, progress_callback=None, cancel_callback=None) -> Dict:
     """
     Ejecuta el scraper de SEIA.
-    Retorna lista de dicts con campos: source, project_name, date, sector, description, raw_data
+    Retorna dict con: {new_leads: [...], estado_changes: [...]}
     
     Args:
         obtener_descripcion: Si es True, obtiene la descripción completa de cada proyecto (más lento pero más info)
-        existing_codes: Set de códigos SEIA ya existentes para evitar duplicados
+        existing_projects: Dict {codigo_seia: {lead_id, estado, project_name, raw_data}} de proyectos existentes
         progress_callback: Función para reportar progreso (recibe porcentaje y mensaje)
         cancel_callback: Función para verificar si se debe cancelar (retorna True para cancelar)
     """
     print("🔄 Iniciando scraper SEIA...")
     
-    proyectos = []
+    proyectos_nuevos = []
+    estado_changes = []  # Lista de cambios de estado detectados
     pagina = 1
-    max_proyectos = 50  # Máximo de proyectos a obtener (reducido para testing)
+    max_proyectos = 50  # Máximo de proyectos nuevos a obtener
     registros_por_pagina = 100  # 100 proyectos por página para mayor eficiencia
     duplicados_consecutivos = 0
     max_duplicados_consecutivos = 10  # Detener después de 10 duplicados seguidos
     
-    if existing_codes is None:
-        existing_codes = set()
+    if existing_projects is None:
+        existing_projects = {}
+    
+    existing_codes = set(existing_projects.keys())
     
     def is_cancelled():
         return cancel_callback and cancel_callback()
@@ -319,95 +322,118 @@ def run_seia(obtener_descripcion: bool = True, existing_codes: set = None, progr
             progress_callback(percent, msg)
     
     try:
-        # Fase 1: Obtener listado de proyectos (40% del progreso)
-        report_progress(0, "📄 Obteniendo listado de proyectos...")
+        # Fase 1: Obtener listado y detectar cambios de estado (40% del progreso)
+        report_progress(0, "Obteniendo proyectos...")
         
-        while len(proyectos) < max_proyectos:
+        while len(proyectos_nuevos) < max_proyectos:
             # Verificar cancelación
             if is_cancelled():
-                report_progress(0, "🛑 Cancelado por el usuario")
-                return []
+                report_progress(0, "Cancelado")
+                return {'new_leads': [], 'estado_changes': estado_changes}
             
-            progress_fase1 = min(40, int((len(proyectos) / max_proyectos) * 40))
-            report_progress(progress_fase1, f"📄 Obteniendo página {pagina} ({registros_por_pagina} proyectos por página)...")
+            progress_fase1 = min(40, int((len(proyectos_nuevos) / max_proyectos) * 40))
+            report_progress(progress_fase1, f"Página {pagina}...")
             
             datos = fetch_datos_listado(pagina=pagina, registros_por_pagina=registros_por_pagina)
             proyectos_pagina = parse_listado_json(datos)
             
             if not proyectos_pagina:
-                report_progress(40, f"⚠️  No se encontraron proyectos en la página {pagina}.")
+                report_progress(40, "Sin más proyectos")
                 break
             
-            # Filtrar duplicados y detectar si debemos detenernos
-            proyectos_nuevos = []
+            # Procesar cada proyecto
             for proyecto in proyectos_pagina:
                 codigo = str(proyecto.get('codigo_seia', ''))
+                estado_actual = proyecto.get('estado', '')
+                
                 if codigo and codigo in existing_codes:
+                    # Proyecto existente - verificar si cambió el estado
+                    proyecto_guardado = existing_projects.get(codigo, {})
+                    estado_anterior = proyecto_guardado.get('estado', '')
+                    
+                    # Comparar estados (normalizar para comparación)
+                    if estado_anterior and estado_actual and estado_anterior.strip().lower() != estado_actual.strip().lower():
+                        # ¡Cambio de estado detectado!
+                        print(f"  🔄 CAMBIO DE ESTADO: {proyecto.get('nombre', 'N/A')}")
+                        print(f"      Antes: {estado_anterior} -> Ahora: {estado_actual}")
+                        
+                        estado_changes.append({
+                            'lead_id': proyecto_guardado.get('lead_id'),
+                            'codigo_seia': codigo,
+                            'project_name': proyecto.get('nombre', ''),
+                            'estado_anterior': estado_anterior,
+                            'estado_nuevo': estado_actual,
+                            'raw_data': proyecto_guardado.get('raw_data', {})
+                        })
+                    
                     duplicados_consecutivos += 1
-                    print(f"  ⏭️  Proyecto ya existe (código {codigo}), saltando...")
                     if duplicados_consecutivos >= max_duplicados_consecutivos:
-                        report_progress(40, f"🛑 Deteniendo: encontrados {max_duplicados_consecutivos} proyectos duplicados consecutivos")
+                        report_progress(40, "Duplicados detectados, deteniendo...")
                         break
                 else:
-                    duplicados_consecutivos = 0  # Reset contador
+                    # Proyecto nuevo
+                    duplicados_consecutivos = 0
                     proyectos_nuevos.append(proyecto)
             
             # Si alcanzamos el límite de duplicados, salir del loop
             if duplicados_consecutivos >= max_duplicados_consecutivos:
                 break
             
-            proyectos.extend(proyectos_nuevos)
-            report_progress(progress_fase1, f"✅ Página {pagina}: {len(proyectos_nuevos)} nuevos proyectos (total: {len(proyectos)})")
+            report_progress(progress_fase1, f"Página {pagina}: {len(proyectos_nuevos)} nuevos")
             
             # Si obtuvimos menos de lo esperado, ya no hay más páginas
             if len(proyectos_pagina) < registros_por_pagina:
                 break
             
             # Si ya tenemos suficientes, detener
-            if len(proyectos) >= max_proyectos:
-                proyectos = proyectos[:max_proyectos]
+            if len(proyectos_nuevos) >= max_proyectos:
+                proyectos_nuevos = proyectos_nuevos[:max_proyectos]
                 break
             
             pagina += 1
             time.sleep(0.5)  # Pausa entre páginas
         
-        report_progress(40, f"✅ Listado completado: {len(proyectos)} proyectos nuevos")
+        cambios_msg = f", {len(estado_changes)} cambios de estado" if estado_changes else ""
+        report_progress(40, f"{len(proyectos_nuevos)} nuevos{cambios_msg}")
         
-        # Fase 2: Obtener descripciones (40% al 95% del progreso)
-        if obtener_descripcion and proyectos:
-            report_progress(40, "📝 Obteniendo descripciones detalladas de proyectos...")
-            total_proyectos = len(proyectos)
-            for i, proyecto in enumerate(proyectos):
+        # Fase 2: Obtener descripciones de proyectos NUEVOS (40% al 95% del progreso)
+        if obtener_descripcion and proyectos_nuevos:
+            report_progress(40, "Obteniendo descripciones...")
+            total_proyectos = len(proyectos_nuevos)
+            for i, proyecto in enumerate(proyectos_nuevos):
                 # Verificar cancelación
                 if is_cancelled():
-                    report_progress(0, "🛑 Cancelado por el usuario")
-                    return []
+                    report_progress(0, "Cancelado")
+                    return {'new_leads': [], 'estado_changes': estado_changes}
                 
                 if proyecto.get('link_ficha'):
                     progress_fase2 = 40 + int(((i + 1) / total_proyectos) * 55)
-                    report_progress(progress_fase2, f"  📄 Descripción {i+1}/{total_proyectos}")
+                    report_progress(progress_fase2, f"Descripción {i+1}/{total_proyectos}")
                     descripcion = fetch_descripcion_proyecto(proyecto['link_ficha'])
                     proyecto['descripcion_completa'] = descripcion
                     time.sleep(0.3)  # Pausa entre requests
         
-        report_progress(95, f"✅ Scraping SEIA completado: {len(proyectos)} proyectos nuevos")
+        report_progress(95, "Finalizando...")
         
         # Fase 3: Normalizar datos (95% al 100%)
         leads = []
-        for proyecto in proyectos:
+        for proyecto in proyectos_nuevos:
             lead = {
                 'source': 'SEIA',
                 'project_name': proyecto.get('nombre', 'Sin nombre'),
                 'date': proyecto.get('fecha_presentacion', ''),
                 'sector': proyecto.get('tipo_proyecto', proyecto.get('tipo', '')),
                 'description': f"Titular: {proyecto.get('titular', 'N/A')}. Región: {proyecto.get('region', 'N/A')}, {proyecto.get('comuna', 'N/A')}. Inversión: {proyecto.get('inversion_formato', 'N/A')}. Estado: {proyecto.get('estado', 'N/A')}.",
-                'raw_data': proyecto  # Guardar todos los datos originales incluyendo industria
+                'raw_data': proyecto
             }
             leads.append(lead)
         
-        report_progress(100, f"✅ Completado: {len(leads)} leads nuevos")
+        report_progress(100, f"Completado: {len(leads)} nuevos{cambios_msg}")
         
-        return leads
+        return {
+            'new_leads': leads,
+            'estado_changes': estado_changes
+        }
         
     except Exception as e:
         print(f"❌ Error en scraper SEIA: {e}")

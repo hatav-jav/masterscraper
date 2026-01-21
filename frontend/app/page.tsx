@@ -4,11 +4,13 @@ import { useState, useEffect } from 'react';
 import ScraperButton from '@/components/ScraperButton';
 import DataTable from '@/components/DataTable';
 import LastRuns from '@/components/LastRuns';
-import { scrapeAll, generateReport } from '@/lib/api';
+import EstadoChanges from '@/components/EstadoChanges';
+import { scrapeAll, generateReport, downloadMarkdownReport } from '@/lib/api';
 
 export default function Home() {
   const [runningAll, setRunningAll] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
+  const [downloadingMD, setDownloadingMD] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleRunAll = async () => {
@@ -42,6 +44,18 @@ export default function Home() {
 
   const handleScraperComplete = () => {
     setRefreshKey(prev => prev + 1);
+  };
+
+  const handleDownloadMD = async () => {
+    setDownloadingMD(true);
+    try {
+      await downloadMarkdownReport();
+    } catch (error) {
+      console.error('Error downloading report:', error);
+      alert('Error al descargar reporte');
+    } finally {
+      setDownloadingMD(false);
+    }
   };
 
   return (
@@ -120,8 +134,35 @@ export default function Home() {
                 </>
               )}
             </button>
+
+            {/* Download MD Report Button */}
+            <button
+              onClick={handleDownloadMD}
+              disabled={downloadingMD}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-surface-elevated border border-border text-dark-text font-medium hover:bg-border transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {downloadingMD ? (
+                <>
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                  </svg>
+                  Downloading...
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download Report (MD)
+                </>
+              )}
+            </button>
           </div>
         </section>
+
+        {/* Estado Changes Section */}
+        <EstadoChanges key={`changes-${refreshKey}`} />
 
         {/* Last Runs Section */}
         <LastRuns key={`runs-${refreshKey}`} />

@@ -2,13 +2,17 @@
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
 async function apiRequest(endpoint: string, options: RequestInit = {}) {
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
   };
 
   if (API_KEY) {
     headers['X-API-Key'] = API_KEY;
+  }
+  
+  // Merge with any existing headers from options
+  if (options.headers) {
+    Object.assign(headers, options.headers);
   }
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -62,4 +66,34 @@ export async function cancelScrape(source: string) {
   return apiRequest(`/scrape-cancel/${source}`, {
     method: 'POST',
   });
+}
+
+export async function getEstadoChanges(limit: number = 20) {
+  return apiRequest(`/estado-changes?limit=${limit}`);
+}
+
+export async function downloadMarkdownReport() {
+  const headers: Record<string, string> = {};
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
+  
+  const response = await fetch(`${API_BASE_URL}/export/markdown`, {
+    headers,
+  });
+  
+  if (!response.ok) {
+    throw new Error('Error al descargar reporte');
+  }
+  
+  // Obtener el blob y descargarlo
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `master_scraper_report_${new Date().toISOString().slice(0, 10)}.md`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
 }
