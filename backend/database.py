@@ -94,12 +94,13 @@ def update_run(run_id: int, status: str, total_leads: int = 0):
     conn.commit()
     conn.close()
 
-def get_latest_leads(limit: int = 100) -> List[Dict]:
-    """Obtiene los últimos leads."""
+def get_latest_leads(limit: int = 500, sort_by: str = None, sort_order: str = 'desc') -> List[Dict]:
+    """Obtiene los ultimos leads."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
+    # Query simple sin ordenamiento complejo
     cursor.execute('''
         SELECT source, project_name, date, sector, description, raw_data, created_at
         FROM leads
@@ -160,20 +161,63 @@ def get_all_leads_for_report() -> List[Dict]:
     return get_latest_leads(limit=500)
 
 
+def get_existing_project_names(source: str) -> set:
+    """Obtiene los nombres de proyectos existentes para una fuente específica."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT project_name FROM leads WHERE source = ?
+    ''', (source,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return {row[0] for row in rows if row[0]}
+
+
+def get_existing_seia_codes() -> set:
+    """Obtiene los códigos SEIA de proyectos ya scrapeados."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Buscar tanto 'seia' como 'SEIA' por si acaso
+    cursor.execute('''
+        SELECT raw_data FROM leads WHERE LOWER(source) = 'seia'
+    ''')
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    codes = set()
+    for row in rows:
+        if row[0]:
+            try:
+                data = json.loads(row[0])
+                codigo = data.get('codigo_seia')
+                if codigo:
+                    codes.add(str(codigo))
+            except:
+                pass
+    
+    return codes
 
 def get_recent_runs(limit: int = 10) -> List[Dict]:
     """Obtiene el historial reciente de ejecuciones de scrapers."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    
     cursor.execute('''
         SELECT id, source, status, total_leads, started_at, completed_at
         FROM runs
         ORDER BY started_at DESC
         LIMIT ?
     ''', (limit,))
+    
     rows = cursor.fetchall()
     conn.close()
+    
     runs = []
     for row in rows:
         runs.append({
@@ -184,4 +228,5 @@ def get_recent_runs(limit: int = 10) -> List[Dict]:
             'started_at': row['started_at'],
             'completed_at': row['completed_at']
         })
+    
     return runs

@@ -35,8 +35,9 @@ export default function LastRuns() {
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return 'N/A';
-    const date = new Date(dateStr);
+    const date = new Date(dateStr + 'Z'); // Asegurar que se interprete como UTC
     return date.toLocaleString('es-CL', {
+      timeZone: 'America/Santiago',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -65,6 +66,15 @@ export default function LastRuns() {
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
             </svg>
             Running
+          </span>
+        );
+      case 'cancelled':
+        return (
+          <span className="inline-flex items-center gap-1.5 badge badge-error">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"/>
+            </svg>
+            Cancelled
           </span>
         );
       case 'error':

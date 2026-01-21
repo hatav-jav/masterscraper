@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { scrapeSource } from '@/lib/api';
+import { useState, useEffect, useRef } from 'react';
+import { scrapeSource, getScrapeProgress, cancelScrape } from '@/lib/api';
 
 interface ScraperButtonProps {
   source: string;
@@ -12,27 +12,110 @@ interface ScraperButtonProps {
 
 export default function ScraperButton({ source, label, description, onComplete }: ScraperButtonProps) {
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ percent: number; message: string } | null>(null);
   const [result, setResult] = useState<{ success: boolean; message: string; count?: number } | null>(null);
+  const progressInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Limpiar intervalo al desmontar
+  useEffect(() => {
+    return () => {
+      if (progressInterval.current) {
+        clearInterval(progressInterval.current);
+      }
+    };
+  }, []);
+
+  const startProgressPolling = () => {
+    // Polling cada 1 segundo para obtener progreso
+    progressInterval.current = setInterval(async () => {
+      try {
+        const progressData = await getScrapeProgress(source);
+        setProgress(progressData);
+      } catch (e) {
+        // Ignorar errores de polling
+      }
+    }, 1000);
+  };
+
+  const stopProgressPolling = () => {
+    if (progressInterval.current) {
+      clearInterval(progressInterval.current);
+      progressInterval.current = null;
+    }
+  };
 
   const handleClick = async () => {
     setLoading(true);
     setResult(null);
+    setProgress({ percent: 0, message: 'Iniciando...' });
     
     try {
-      const response = await scrapeSource(source);
-      setResult({
-        success: true,
-        message: 'Completed',
-        count: response.total_leads,
+      // Iniciar el scraper (retorna inmediatamente)
+      const startResponse = await scrapeSource(source);
+      
+      if (startResponse.status === 'already_running') {
+        setProgress(startResponse.progress);
+      }
+      
+      // Iniciar polling de progreso
+      startProgressPolling();
+      
+      // Esperar a que termine el scraper
+      await new Promise<void>((resolve) => {
+        const checkCompletion = setInterval(async () => {
+          try {
+            const progressData = await getScrapeProgress(source);
+            setProgress({ percent: progressData.percent, message: progressData.message });
+            
+            // Si hay resultado, el scraper terminó
+            if (progressData.result) {
+              clearInterval(checkCompletion);
+              stopProgressPolling();
+              
+              if (progressData.result.status === 'success') {
+                setResult({
+                  success: true,
+                  message: 'Completed',
+                  count: progressData.result.total_leads,
+                });
+                onComplete?.();
+              } else if (progressData.result.status === 'cancelled') {
+                setResult({
+                  success: false,
+                  message: 'Cancelado',
+                });
+              } else {
+                setResult({
+                  success: false,
+                  message: progressData.result.error || 'Error',
+                });
+              }
+              setProgress(null);
+              setLoading(false);
+              resolve();
+            }
+          } catch (e) {
+            // Ignorar errores de polling
+          }
+        }, 1000);
       });
-      onComplete?.();
     } catch (error: any) {
+      stopProgressPolling();
       setResult({
         success: false,
         message: error.message || 'Error',
       });
-    } finally {
+      setProgress(null);
       setLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    try {
+      await cancelScrape(source);
+      setProgress({ percent: 0, message: 'Cancelando...' });
+    } catch (e) {
+      // Ignorar errores
     }
   };
 
@@ -47,8 +130,25 @@ export default function ScraperButton({ source, label, description, onComplete }
             <p className="text-sm text-dark-muted">{description}</p>
           )}
           
+          {/* Progress indicator */}
+          {loading && progress && (
+            <div className="mt-3">
+              <div className="flex items-center gap-3">
+                <div className="flex-1 bg-surface-elevated rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-primary h-full rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${progress.percent}%` }}
+                  />
+                </div>
+                <span className="text-sm font-semibold text-primary min-w-[3rem] text-right">
+                  {progress.percent}%
+                </span>
+              </div>
+            </div>
+          )}
+          
           {/* Result indicator */}
-          {result && (
+          {result && !loading && (
             <div className={`mt-3 flex items-center gap-2 text-sm ${result.success ? 'text-green-400' : 'text-red-400'}`}>
               {result.success ? (
                 <>
@@ -69,28 +169,41 @@ export default function ScraperButton({ source, label, description, onComplete }
           )}
         </div>
         
-        <button
-          onClick={handleClick}
-          disabled={loading}
-          className="ml-4 px-4 py-2 rounded-lg bg-surface-elevated border border-border text-dark-text text-sm font-medium hover:bg-border transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-        >
-          {loading ? (
-            <>
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-              </svg>
-              Running...
-            </>
-          ) : (
-            <>
+        <div className="flex gap-2 ml-4">
+          {loading && (
+            <button
+              onClick={handleCancel}
+              className="px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium hover:bg-red-500/30 transition-all flex items-center gap-1"
+            >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
-              Run
-            </>
+              Stop
+            </button>
           )}
-        </button>
+          <button
+            onClick={handleClick}
+            disabled={loading}
+            className="px-4 py-2 rounded-lg bg-surface-elevated border border-border text-dark-text text-sm font-medium hover:bg-border transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                </svg>
+                Running...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                </svg>
+                Run
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,11 +1,15 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from backend.database import init_db, save_leads, create_run, update_run, get_latest_leads, get_all_leads_for_report, get_recent_runs
+from fastapi.responses import JSONResponse, StreamingResponse
+from backend.database import init_db, save_leads, create_run, update_run, get_latest_leads, get_all_leads_for_report, get_recent_runs, get_existing_seia_codes
 from backend.auth import AuthMiddleware
 from backend.report import generate_report_with_ai, send_email_report
 from backend.config import EMAIL_TO
 import traceback
+import json
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 # Importar scrapers explícitamente
 from scrapers.seia.scraper import run_seia
@@ -16,6 +20,15 @@ SCRAPERS = {
     'seia': run_seia,
     'hechos_esenciales': run_hechos_esenciales,
 }
+
+# Variable global para almacenar el progreso de scrapers activos
+scraper_progress = {}
+# Variable global para controlar cancelación
+scraper_cancel = {}
+# Variable global para almacenar resultados de scrapers
+scraper_results = {}
+# Thread pool para ejecutar scrapers
+executor = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI(title="Master Scraper API")
 
@@ -45,21 +58,41 @@ async def root():
     """Endpoint raíz - información de la API."""
     return {"message": "Master Scraper API", "version": "1.0.0"}
 
-@app.post("/scrape/{source}")
-async def scrape_source(source: str):
-    """
-    Ejecuta un scraper específico.
-    """
-    if source not in SCRAPERS:
-        raise HTTPException(status_code=404, detail=f"Scraper '{source}' no encontrado")
+def run_scraper_thread(source: str, run_id: int):
+    """Ejecuta el scraper en un thread separado."""
+    global scraper_progress, scraper_cancel, scraper_results
     
     try:
-        # Crear registro de run
-        run_id = create_run(source)
+        # Función callback para actualizar progreso
+        def update_progress(percent, message):
+            scraper_progress[source] = {"percent": percent, "message": message}
         
-        # Ejecutar scraper
+        # Función callback para verificar cancelación
+        def check_cancel():
+            return scraper_cancel.get(source, False)
+        
+        # Ejecutar scraper con parámetros adicionales según el tipo
         scraper_func = SCRAPERS[source]
-        leads = scraper_func()
+        
+        if source == 'seia':
+            # Obtener códigos existentes para evitar duplicados
+            existing_codes = get_existing_seia_codes()
+            print(f"📊 Encontrados {len(existing_codes)} proyectos SEIA existentes en BD")
+            leads = scraper_func(existing_codes=existing_codes, progress_callback=update_progress, cancel_callback=check_cancel)
+        else:
+            leads = scraper_func()
+        
+        # Verificar si fue cancelado
+        if scraper_cancel.get(source, False):
+            update_run(run_id, 'cancelled', len(leads))
+            scraper_progress[source] = {"percent": 0, "message": "Cancelado"}
+            scraper_results[source] = {
+                "status": "cancelled",
+                "source": source,
+                "total_leads": len(leads),
+                "run_id": run_id
+            }
+            return
         
         # Guardar leads en BD
         total_leads = save_leads(source, leads)
@@ -67,7 +100,10 @@ async def scrape_source(source: str):
         # Actualizar run
         update_run(run_id, 'completed', total_leads)
         
-        return {
+        # Limpiar progreso
+        scraper_progress[source] = {"percent": 100, "message": "Completado"}
+        
+        scraper_results[source] = {
             "status": "success",
             "source": source,
             "total_leads": total_leads,
@@ -80,9 +116,51 @@ async def scrape_source(source: str):
         except:
             pass
         
-        error_detail = str(e)
+        # Limpiar progreso con error
+        scraper_progress[source] = {"percent": 0, "message": f"Error: {str(e)}"}
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error al ejecutar scraper: {error_detail}")
+        
+        scraper_results[source] = {
+            "status": "error",
+            "source": source,
+            "error": str(e),
+            "run_id": run_id
+        }
+
+
+@app.post("/scrape/{source}")
+async def scrape_source(source: str):
+    """
+    Ejecuta un scraper específico en background y retorna inmediatamente.
+    El progreso se puede consultar con GET /scrape-progress/{source}
+    """
+    global scraper_progress, scraper_cancel, scraper_results
+    
+    if source not in SCRAPERS:
+        raise HTTPException(status_code=404, detail=f"Scraper '{source}' no encontrado")
+    
+    # Verificar si ya hay un scraper corriendo para esta fuente
+    if source in scraper_progress and scraper_progress[source].get("percent", 0) > 0 and scraper_progress[source].get("percent", 0) < 100:
+        return {"status": "already_running", "source": source, "progress": scraper_progress[source]}
+    
+    # Inicializar progreso y resetear cancelación
+    scraper_progress[source] = {"percent": 0, "message": "Iniciando..."}
+    scraper_cancel[source] = False
+    scraper_results[source] = None
+    
+    # Crear registro de run
+    run_id = create_run(source)
+    
+    # Ejecutar scraper en thread separado
+    executor.submit(run_scraper_thread, source, run_id)
+    
+    # Retornar inmediatamente
+    return {
+        "status": "started",
+        "source": source,
+        "run_id": run_id,
+        "message": "Scraper iniciado. Consulta /scrape-progress/{source} para ver el progreso."
+    }
 
 
 @app.post("/scrape-all")
@@ -211,6 +289,31 @@ async def get_runs(limit: int = Query(10, ge=1, le=100)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener runs: {str(e)}")
+
+
+@app.get("/scrape-progress/{source}")
+async def get_scrape_progress(source: str):
+    """
+    Obtiene el progreso actual de un scraper en ejecución.
+    """
+    progress = scraper_progress.get(source, {"percent": 0, "message": "No hay scraper en ejecución"})
+    result = scraper_results.get(source)
+    
+    # Si hay resultado, incluirlo en la respuesta
+    if result:
+        return {**progress, "result": result}
+    
+    return progress
+
+
+@app.post("/scrape-cancel/{source}")
+async def cancel_scrape(source: str):
+    """
+    Cancela un scraper en ejecución.
+    """
+    global scraper_cancel
+    scraper_cancel[source] = True
+    return {"status": "cancelled", "source": source}
 
 
 if __name__ == "__main__":

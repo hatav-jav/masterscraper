@@ -175,13 +175,35 @@ def fetch_descripcion_proyecto(url_ficha: str) -> str:
 
 
 def _parse_inversion_millones(inversion_str: str):
-    """Parsea el formato de inversión del SEIA a millones de dólares."""
+    """
+    Parsea el formato de inversión del SEIA a millones de dólares.
+    El SEIA usa formato chileno/europeo: punto para miles, coma para decimales.
+    Ejemplos: "10.000" = 10 millones, "1.300" = 1300 millones, "339,594" = 339.594 millones
+    """
     if not inversion_str or not isinstance(inversion_str, str):
         return None
     
     try:
-        inversion_limpia = inversion_str.replace(',', '.')
-        return float(inversion_limpia)
+        inversion_limpia = inversion_str.strip()
+        
+        # El SEIA usa formato chileno: punto para miles, coma para decimales
+        # "10.000" significa 10 (diez millones), no 10000
+        # "1.300" significa 1300 (mil trescientos millones)
+        # "339,594" significa 339.594 millones
+        
+        if ',' in inversion_limpia and '.' in inversion_limpia:
+            # Formato completo: "1.300,50" -> 1300.50
+            inversion_limpia = inversion_limpia.replace('.', '').replace(',', '.')
+        elif ',' in inversion_limpia:
+            # Solo coma = decimal: "339,594" -> 339.594
+            inversion_limpia = inversion_limpia.replace(',', '.')
+        elif '.' in inversion_limpia:
+            # Solo punto = separador de miles chileno: "10.000" -> 10
+            # Remover todos los puntos (son separadores de miles)
+            inversion_limpia = inversion_limpia.replace('.', '')
+        
+        valor = float(inversion_limpia)
+        return valor if valor > 0 else None
     except (ValueError, TypeError):
         return None
 
@@ -265,34 +287,77 @@ def parse_listado_json(datos_json: dict) -> List[Dict[str, str]]:
     return proyectos
 
 
-def run_seia(obtener_descripcion: bool = True) -> List[Dict]:
+def run_seia(obtener_descripcion: bool = True, existing_codes: set = None, progress_callback=None, cancel_callback=None) -> List[Dict]:
     """
     Ejecuta el scraper de SEIA.
     Retorna lista de dicts con campos: source, project_name, date, sector, description, raw_data
     
     Args:
         obtener_descripcion: Si es True, obtiene la descripción completa de cada proyecto (más lento pero más info)
+        existing_codes: Set de códigos SEIA ya existentes para evitar duplicados
+        progress_callback: Función para reportar progreso (recibe porcentaje y mensaje)
+        cancel_callback: Función para verificar si se debe cancelar (retorna True para cancelar)
     """
     print("🔄 Iniciando scraper SEIA...")
     
     proyectos = []
     pagina = 1
-    max_proyectos = 20  # Máximo de proyectos a obtener
+    max_proyectos = 50  # Máximo de proyectos a obtener (reducido para testing)
     registros_por_pagina = 100  # 100 proyectos por página para mayor eficiencia
+    duplicados_consecutivos = 0
+    max_duplicados_consecutivos = 10  # Detener después de 10 duplicados seguidos
+    
+    if existing_codes is None:
+        existing_codes = set()
+    
+    def is_cancelled():
+        return cancel_callback and cancel_callback()
+    
+    def report_progress(percent, msg):
+        print(msg)
+        if progress_callback:
+            progress_callback(percent, msg)
     
     try:
+        # Fase 1: Obtener listado de proyectos (40% del progreso)
+        report_progress(0, "📄 Obteniendo listado de proyectos...")
+        
         while len(proyectos) < max_proyectos:
-            print(f"📄 Obteniendo página {pagina} ({registros_por_pagina} proyectos por página)...")
+            # Verificar cancelación
+            if is_cancelled():
+                report_progress(0, "🛑 Cancelado por el usuario")
+                return []
+            
+            progress_fase1 = min(40, int((len(proyectos) / max_proyectos) * 40))
+            report_progress(progress_fase1, f"📄 Obteniendo página {pagina} ({registros_por_pagina} proyectos por página)...")
             
             datos = fetch_datos_listado(pagina=pagina, registros_por_pagina=registros_por_pagina)
             proyectos_pagina = parse_listado_json(datos)
             
             if not proyectos_pagina:
-                print(f"⚠️  No se encontraron proyectos en la página {pagina}.")
+                report_progress(40, f"⚠️  No se encontraron proyectos en la página {pagina}.")
                 break
             
-            proyectos.extend(proyectos_pagina)
-            print(f"✅ Página {pagina}: {len(proyectos_pagina)} proyectos obtenidos (total: {len(proyectos)})")
+            # Filtrar duplicados y detectar si debemos detenernos
+            proyectos_nuevos = []
+            for proyecto in proyectos_pagina:
+                codigo = str(proyecto.get('codigo_seia', ''))
+                if codigo and codigo in existing_codes:
+                    duplicados_consecutivos += 1
+                    print(f"  ⏭️  Proyecto ya existe (código {codigo}), saltando...")
+                    if duplicados_consecutivos >= max_duplicados_consecutivos:
+                        report_progress(40, f"🛑 Deteniendo: encontrados {max_duplicados_consecutivos} proyectos duplicados consecutivos")
+                        break
+                else:
+                    duplicados_consecutivos = 0  # Reset contador
+                    proyectos_nuevos.append(proyecto)
+            
+            # Si alcanzamos el límite de duplicados, salir del loop
+            if duplicados_consecutivos >= max_duplicados_consecutivos:
+                break
+            
+            proyectos.extend(proyectos_nuevos)
+            report_progress(progress_fase1, f"✅ Página {pagina}: {len(proyectos_nuevos)} nuevos proyectos (total: {len(proyectos)})")
             
             # Si obtuvimos menos de lo esperado, ya no hay más páginas
             if len(proyectos_pagina) < registros_por_pagina:
@@ -306,19 +371,28 @@ def run_seia(obtener_descripcion: bool = True) -> List[Dict]:
             pagina += 1
             time.sleep(0.5)  # Pausa entre páginas
         
-        print(f"✅ Scraping SEIA completado: {len(proyectos)} proyectos obtenidos")
+        report_progress(40, f"✅ Listado completado: {len(proyectos)} proyectos nuevos")
         
-        # Opcionalmente obtener descripción completa de cada proyecto
-        if obtener_descripcion:
-            print("📝 Obteniendo descripciones detalladas de proyectos...")
+        # Fase 2: Obtener descripciones (40% al 95% del progreso)
+        if obtener_descripcion and proyectos:
+            report_progress(40, "📝 Obteniendo descripciones detalladas de proyectos...")
+            total_proyectos = len(proyectos)
             for i, proyecto in enumerate(proyectos):
+                # Verificar cancelación
+                if is_cancelled():
+                    report_progress(0, "🛑 Cancelado por el usuario")
+                    return []
+                
                 if proyecto.get('link_ficha'):
-                    print(f"  📄 Obteniendo descripción {i+1}/{len(proyectos)}...")
+                    progress_fase2 = 40 + int(((i + 1) / total_proyectos) * 55)
+                    report_progress(progress_fase2, f"  📄 Descripción {i+1}/{total_proyectos}")
                     descripcion = fetch_descripcion_proyecto(proyecto['link_ficha'])
                     proyecto['descripcion_completa'] = descripcion
                     time.sleep(0.3)  # Pausa entre requests
         
-        # Normalizar salida al formato estándar del hub
+        report_progress(95, f"✅ Scraping SEIA completado: {len(proyectos)} proyectos nuevos")
+        
+        # Fase 3: Normalizar datos (95% al 100%)
         leads = []
         for proyecto in proyectos:
             lead = {
@@ -330,6 +404,8 @@ def run_seia(obtener_descripcion: bool = True) -> List[Dict]:
                 'raw_data': proyecto  # Guardar todos los datos originales incluyendo industria
             }
             leads.append(lead)
+        
+        report_progress(100, f"✅ Completado: {len(leads)} leads nuevos")
         
         return leads
         
