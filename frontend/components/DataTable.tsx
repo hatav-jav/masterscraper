@@ -103,17 +103,18 @@ export default function DataTable() {
   };
 
   const getIndustriaColor = (industria?: string) => {
+    // Colores sincronizados con backend/category_rules.py
     const colors: Record<string, string> = {
-      'Minería': 'bg-amber-500/20 text-amber-400',
-      'Energía': 'bg-yellow-500/20 text-yellow-400',
-      'Agua': 'bg-cyan-500/20 text-cyan-400',
-      'Puertos': 'bg-blue-500/20 text-blue-400',
-      'Infraestructura': 'bg-slate-500/20 text-slate-400',
-      'Inmobiliario': 'bg-purple-500/20 text-purple-400',
-      'Industrial': 'bg-orange-500/20 text-orange-400',
-      'Otros': 'bg-gray-500/20 text-gray-400',
+      'Energía Renovable': 'bg-green-500/20 text-green-400 border border-green-500/50',
+      'BESS': 'bg-blue-500/20 text-blue-400 border border-blue-500/50',
+      'Infraestructura Eléctrica': 'bg-orange-500/20 text-orange-400 border border-orange-500/50',
+      'Minería': 'bg-gray-600/20 text-gray-300 border border-gray-500/50',
+      'Agua': 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50',
+      'Desarrollo de Proyectos': 'bg-purple-500/20 text-purple-400 border border-purple-500/50',
+      'Infraestructura y Construcción': 'bg-amber-700/20 text-amber-500 border border-amber-600/50',
+      'Otros': 'bg-gray-400/20 text-gray-400 border border-gray-400/50',
     };
-    return colors[industria || ''] || 'bg-gray-500/20 text-gray-400';
+    return colors[industria || ''] || colors['Otros'];
   };
 
   const SortIcon = ({ field }: { field: SortField }) => {

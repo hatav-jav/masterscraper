@@ -7,6 +7,9 @@ from typing import List, Dict
 import requests
 from bs4 import BeautifulSoup
 
+# Importar clasificación por keywords
+from backend.category_rules import clasificar_proyecto
+
 # Variable global para controlar si ya esperamos los 15 segundos iniciales
 _PRIMERA_EJECUCION = True
 
@@ -208,35 +211,12 @@ def _parse_inversion_millones(inversion_str: str):
         return None
 
 
-def _determinar_industria(sector_economico: str, tipo_proyecto: str) -> str:
+def _determinar_industria(nombre: str, descripcion: str = "") -> dict:
     """
-    Determina la industria del proyecto basándose en el sector económico y tipo.
+    Determina la industria del proyecto usando clasificación por keywords.
+    Retorna dict con categoria_principal, categorias_secundarias, color, etc.
     """
-    sector_upper = (sector_economico or '').upper()
-    tipo_upper = (tipo_proyecto or '').upper()
-    
-    # Buscar en el mapeo de sectores
-    for key, industria in SECTOR_TO_INDUSTRIA.items():
-        if key in sector_upper or key in tipo_upper:
-            return industria
-    
-    # Heurísticas adicionales basadas en palabras clave
-    texto = f"{sector_economico} {tipo_proyecto}".upper()
-    
-    if any(word in texto for word in ['MINER', 'COBRE', 'ORO', 'LITIO', 'PLATA']):
-        return 'Minería'
-    if any(word in texto for word in ['ENERGIA', 'SOLAR', 'EÓLICO', 'HIDRO', 'TERMO', 'GAS']):
-        return 'Energía'
-    if any(word in texto for word in ['AGUA', 'DESALADORA', 'HIDRÁULICA', 'RIEGO']):
-        return 'Agua'
-    if any(word in texto for word in ['PUERTO', 'TERMINAL', 'MARITIMO', 'PORTUARIO']):
-        return 'Puertos'
-    if any(word in texto for word in ['CARRETERA', 'CAMINO', 'PUENTE', 'TÚNEL', 'VIAL']):
-        return 'Infraestructura'
-    if any(word in texto for word in ['INMOBILIARIO', 'VIVIENDA', 'EDIFICIO']):
-        return 'Inmobiliario'
-    
-    return 'Otros'
+    return clasificar_proyecto(nombre, descripcion)
 
 
 def parse_listado_json(datos_json: dict) -> List[Dict[str, str]]:
@@ -251,9 +231,13 @@ def parse_listado_json(datos_json: dict) -> List[Dict[str, str]]:
     for proyecto_raw in datos_json['data']:
         sector_economico = proyecto_raw.get('SECTOR_ECONOMICO', '') or proyecto_raw.get('TIPO_PROYECTO', '')
         tipo_proyecto = proyecto_raw.get('TIPO_PROYECTO', '')
+        nombre = proyecto_raw.get('EXPEDIENTE_NOMBRE', '')
+        
+        # Clasificar proyecto por keywords (usa nombre y sector/tipo como descripción)
+        clasificacion = _determinar_industria(nombre, f"{sector_economico} {tipo_proyecto}")
         
         proyecto = {
-            'nombre': proyecto_raw.get('EXPEDIENTE_NOMBRE', ''),
+            'nombre': nombre,
             'link': proyecto_raw.get('EXPEDIENTE_URL_PPAL', ''),
             'titular': proyecto_raw.get('TITULAR', ''),
             'tipo': proyecto_raw.get('WORKFLOW_DESCRIPCION', ''),
@@ -272,7 +256,10 @@ def parse_listado_json(datos_json: dict) -> List[Dict[str, str]]:
             'sector_economico': sector_economico,
             'razon_ingreso': proyecto_raw.get('RAZON_INGRESO', ''),
             'codigo_seia': proyecto_raw.get('EXPEDIENTE_ID', '') or proyecto_raw.get('FOLIO', ''),
-            'industria': _determinar_industria(sector_economico, tipo_proyecto),
+            'industria': clasificacion['categoria_principal'],
+            'categorias_secundarias': clasificacion['categorias_secundarias'],
+            'industria_color': clasificacion['color'],
+            'industria_color_name': clasificacion['color_name'],
         }
         
         # Asegurar que el link sea absoluto
@@ -303,7 +290,7 @@ def run_seia(obtener_descripcion: bool = True, existing_projects: dict = None, p
     proyectos_nuevos = []
     estado_changes = []  # Lista de cambios de estado detectados
     pagina = 1
-    max_proyectos = 50  # Máximo de proyectos nuevos a obtener
+    max_proyectos = 500  # Máximo de proyectos nuevos a obtener
     registros_por_pagina = 100  # 100 proyectos por página para mayor eficiencia
     duplicados_consecutivos = 0
     max_duplicados_consecutivos = 10  # Detener después de 10 duplicados seguidos

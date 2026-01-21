@@ -5,12 +5,14 @@ from backend.database import (
     init_db, save_leads, create_run, update_run, get_latest_leads, 
     get_all_leads_for_report, get_recent_runs, get_existing_seia_projects,
     update_lead_estado, save_estado_change, get_recent_estado_changes,
-    get_all_leads_for_markdown
+    get_all_leads_for_markdown, clear_all_data
 )
 from datetime import datetime
 from backend.auth import AuthMiddleware
 from backend.report import generate_report_with_ai, send_email_report
 from backend.config import EMAIL_TO
+from backend.scoring import get_top_proyectos
+from backend.category_rules import CATEGORIAS, CATEGORIA_DEFAULT, CATEGORIA_DEFAULT_COLOR, CATEGORIA_DEFAULT_COLOR_NAME
 import traceback
 import json
 import asyncio
@@ -373,6 +375,7 @@ async def export_markdown():
     try:
         leads = get_all_leads_for_markdown()
         estado_changes = get_recent_estado_changes(50)
+        top_projects = get_top_proyectos(leads, 20)
         
         # Generar el contenido Markdown
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -386,8 +389,62 @@ async def export_markdown():
 
 - **Total de proyectos:** {len(leads)}
 - **Cambios de estado recientes:** {len(estado_changes)}
+- **Top proyectos seleccionados:** {len(top_projects)}
 
 """
+        
+        # Sección TOP 20 PROYECTOS
+        if top_projects:
+            md_content += """---
+
+## Top 20 Proyectos Más Relevantes
+
+Proyectos seleccionados según criterios de:
+- Estado del proyecto (En Calificación, Admitido a Tramitación, Aprobado)
+- Monto de inversión (>= USD 25 MM, o >= USD 10 MM para BESS/Infra. Eléctrica/Minería)
+- Scoring por inversión y estado
+
+| # | Proyecto | Score | Inversión (USD MM) | Estado | Industria | Explicación |
+|---|----------|-------|-------------------|--------|-----------|-------------|
+"""
+            for p in top_projects:
+                raw = p.get('raw_data', {})
+                inv = raw.get('inversion_millones', 'N/A')
+                inv_str = f"{inv:,.1f}" if isinstance(inv, (int, float)) else str(inv)
+                md_content += f"| {p['ranking']} | {p['project_name'][:40]}... | {p['score_total']} | {inv_str} | {raw.get('estado', 'N/A')[:20]} | {raw.get('industria', 'N/A')} | {p.get('explicacion', '')} |\n"
+            
+            md_content += "\n### Detalle de Top 20 Proyectos\n\n"
+            
+            for p in top_projects:
+                raw = p.get('raw_data', {})
+                md_content += f"""#### {p['ranking']}. {p['project_name']}
+
+- **Score Total:** {p['score_total']} (Inversión: {p.get('score_inversion', 0)}, Estado: {p.get('score_estado', 0)})
+- **Explicación:** {p.get('explicacion', 'N/A')}
+"""
+                if raw.get('titular'):
+                    md_content += f"- **Titular:** {raw['titular']}\n"
+                if raw.get('region'):
+                    md_content += f"- **Región:** {raw['region']}"
+                    if raw.get('comuna'):
+                        md_content += f", {raw['comuna']}"
+                    md_content += "\n"
+                if raw.get('inversion_millones'):
+                    md_content += f"- **Inversión:** US$ {raw['inversion_millones']:,.2f} MM\n"
+                if raw.get('estado'):
+                    md_content += f"- **Estado:** {raw['estado']}\n"
+                if raw.get('industria'):
+                    md_content += f"- **Industria:** {raw['industria']}\n"
+                if raw.get('categorias_secundarias'):
+                    md_content += f"- **Categorías secundarias:** {', '.join(raw['categorias_secundarias'])}\n"
+                if raw.get('tipo'):
+                    md_content += f"- **Tipo:** {raw['tipo']}\n"
+                if raw.get('link_ficha'):
+                    md_content += f"- **Link SEIA:** {raw['link_ficha']}\n"
+                if raw.get('descripcion_completa'):
+                    desc = raw['descripcion_completa'][:500] + "..." if len(raw.get('descripcion_completa', '')) > 500 else raw.get('descripcion_completa', '')
+                    md_content += f"\n**Descripción:** {desc}\n"
+                md_content += "\n"
         
         # Sección de cambios de estado
         if estado_changes:
@@ -442,6 +499,8 @@ async def export_markdown():
                     md_content += f"- **Estado:** {raw['estado']}\n"
                 if raw.get('industria'):
                     md_content += f"- **Industria:** {raw['industria']}\n"
+                if raw.get('categorias_secundarias'):
+                    md_content += f"- **Categorías secundarias:** {', '.join(raw['categorias_secundarias'])}\n"
                 if lead.get('date'):
                     md_content += f"- **Fecha Presentación:** {lead['date']}\n"
                 if raw.get('tipo'):
@@ -463,8 +522,8 @@ async def export_markdown():
 
 Este reporte contiene información de proyectos de inversión en Chile. Por favor analiza:
 
-1. **Proyectos más relevantes** por monto de inversión
-2. **Distribución por industria** (minería, energía, infraestructura, etc.)
+1. **Top 20 proyectos** más relevantes según el scoring automatizado
+2. **Distribución por industria** (BESS, Energía Renovable, Minería, Infraestructura Eléctrica, etc.)
 3. **Distribución geográfica** por región
 4. **Cambios de estado** recientes, especialmente aprobaciones
 5. **Tendencias** y patrones observados
@@ -488,6 +547,55 @@ Genera un informe ejecutivo con los hallazgos más importantes.
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error al generar reporte: {str(e)}")
+
+
+@app.delete("/clear-all")
+async def clear_all():
+    """
+    Elimina todos los datos de leads, runs y estado_changes.
+    Requiere confirmación previa en el frontend.
+    """
+    try:
+        result = clear_all_data()
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error al limpiar datos: {str(e)}")
+
+
+@app.get("/top-projects")
+async def get_top_projects(limit: int = Query(20, ge=1, le=50)):
+    """
+    Obtiene los top N proyectos más relevantes según el scoring.
+    """
+    try:
+        leads = get_all_leads_for_markdown()
+        top_projects = get_top_proyectos(leads, limit)
+        return {
+            "projects": top_projects,
+            "total": len(top_projects)
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error al obtener top proyectos: {str(e)}")
+
+
+@app.get("/category-colors")
+async def get_category_colors():
+    """
+    Obtiene los colores de todas las categorías para el frontend.
+    """
+    colors = {}
+    for cat, config in CATEGORIAS.items():
+        colors[cat] = {
+            "color": config["color"],
+            "color_name": config["color_name"]
+        }
+    colors[CATEGORIA_DEFAULT] = {
+        "color": CATEGORIA_DEFAULT_COLOR,
+        "color_name": CATEGORIA_DEFAULT_COLOR_NAME
+    }
+    return colors
 
 
 if __name__ == "__main__":

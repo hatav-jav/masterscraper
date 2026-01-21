@@ -97,3 +97,17 @@ export async function downloadMarkdownReport() {
   window.URL.revokeObjectURL(url);
   document.body.removeChild(a);
 }
+
+export async function clearAllData() {
+  return apiRequest('/clear-all', {
+    method: 'DELETE',
+  });
+}
+
+export async function getTopProjects(limit: number = 20) {
+  return apiRequest(`/top-projects?limit=${limit}`);
+}
+
+export async function getCategoryColors() {
+  return apiRequest('/category-colors');
+}

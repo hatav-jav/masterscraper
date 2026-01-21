@@ -397,3 +397,21 @@ def get_recent_runs(limit: int = 10) -> List[Dict]:
         })
     
     return runs
+
+
+def clear_all_data():
+    """Elimina todos los datos de leads, runs y estado_changes."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('DELETE FROM leads')
+    cursor.execute('DELETE FROM runs')
+    cursor.execute('DELETE FROM estado_changes')
+    
+    conn.commit()
+    conn.close()
+    
+    return {
+        'success': True,
+        'message': 'Todos los datos han sido eliminados'
+    }
