@@ -1,4 +1,7 @@
-﻿const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { getToken, clearToken } from './auth';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Legacy API Key para compatibilidad en desarrollo
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
 async function apiRequest(endpoint: string, options: RequestInit = {}) {
@@ -6,7 +9,12 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
     'Content-Type': 'application/json',
   };
 
-  if (API_KEY) {
+  // Intentar usar JWT token primero
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  } else if (API_KEY) {
+    // Fallback a API Key para desarrollo local
     headers['X-API-Key'] = API_KEY;
   }
   
@@ -19,6 +27,15 @@ async function apiRequest(endpoint: string, options: RequestInit = {}) {
     ...options,
     headers,
   });
+
+  // Si el token expiró o es inválido, limpiar y redirigir a login
+  if (response.status === 401) {
+    clearToken();
+    if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+      window.location.href = '/login';
+    }
+    throw new Error('Sesión expirada');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
@@ -74,13 +91,26 @@ export async function getEstadoChanges(limit: number = 20) {
 
 export async function downloadMarkdownReport() {
   const headers: Record<string, string> = {};
-  if (API_KEY) {
+  
+  // Usar JWT token
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  } else if (API_KEY) {
     headers['X-API-Key'] = API_KEY;
   }
   
   const response = await fetch(`${API_BASE_URL}/export/markdown`, {
     headers,
   });
+  
+  if (response.status === 401) {
+    clearToken();
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+    throw new Error('Sesión expirada');
+  }
   
   if (!response.ok) {
     throw new Error('Error al descargar reporte');

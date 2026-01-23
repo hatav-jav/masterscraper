@@ -3,20 +3,20 @@ Reglas de clasificación de proyectos por categorías.
 Fácilmente modificable para ajustar keywords y umbrales.
 """
 
-# Umbral mínimo para categoría principal
-UMBRAL_CATEGORIA_PRINCIPAL = 0.10
+# Umbral mínimo para categoría principal (1 match en ~20 keywords = 0.05)
+UMBRAL_CATEGORIA_PRINCIPAL = 0.05
 
 # Umbral mínimo para categorías secundarias
-UMBRAL_CATEGORIA_SECUNDARIA = 0.10
+UMBRAL_CATEGORIA_SECUNDARIA = 0.05
 
 # Definición de categorías con keywords y colores
 CATEGORIAS = {
     "Energía Renovable": {
         "keywords": [
-            "fotovoltaico", "solar", "generación", "ernc", "mwp", "mwac", "gwh",
-            "potencia nominal", "mw salida", "paneles", "módulos", "inversores",
-            "transformación", "corriente continua", "corriente alterna", "sai",
-            "silicio", "monocristalino", "bifacial"
+            "fotovoltaico", "solar", "eólico", "eolico", "parque eólico", "parque eolico",
+            "aerogenerador", "turbina", "generación", "ernc", "mwp", "mwac", "gwh", "mw",
+            "potencia nominal", "potencia instalada", "paneles", "módulos", "inversores",
+            "energía", "energia", "renovable"
         ],
         "color": "#22c55e",  # verde
         "color_name": "green"
@@ -24,16 +24,16 @@ CATEGORIAS = {
     "BESS": {
         "keywords": [
             "bess", "sae", "almacenamiento", "baterías", "batería", "litio",
-            "ferrofosfato", "excedentes de energía", "descarga"
+            "ferrofosfato", "excedentes de energía", "descarga", "storage"
         ],
         "color": "#3b82f6",  # azul
         "color_name": "blue"
     },
     "Infraestructura Eléctrica": {
         "keywords": [
-            "transmisión", "interconexión", "subestación", "elevadora", "línea",
-            "circuito simple", "alta tensión", "media tensión", "220kv", "66kv",
-            "cen", "sen"
+            "transmisión", "interconexión", "subestación", "elevadora", "línea eléctrica",
+            "linea electrica", "circuito", "alta tensión", "media tensión", "220kv", "66kv",
+            "110kv", "23kv", "kv", "cen", "sen", "tendido"
         ],
         "color": "#f97316",  # naranja
         "color_name": "orange"
@@ -48,9 +48,9 @@ CATEGORIAS = {
     },
     "Minería": {
         "keywords": [
-            "minería", "mina", "extracción", "rajo", "estéril", "concentrados",
-            "concentradora", "producción", "tasa", "ley mineral", "cobre",
-            "molibdeno", "cátodos", "transporte terrestre", "cantera", "puertos"
+            "minería", "mineria", "mina", "minero", "minera", "extracción", "rajo",
+            "estéril", "concentrados", "concentradora", "mineral", "cobre", "oro", "plata",
+            "molibdeno", "litio", "cátodos", "cantera", "faena", "yacimiento", "depósito"
         ],
         "color": "#374151",  # gris oscuro
         "color_name": "gray-dark"
@@ -58,15 +58,15 @@ CATEGORIAS = {
     "Agua": {
         "keywords": [
             "acueducto", "embalse", "tranque", "riego", "agua", "desaladora",
-            "desalinización", "hídrico"
+            "desalinización", "hídrico", "hidrico", "planta de agua", "tratamiento"
         ],
         "color": "#06b6d4",  # celeste
         "color_name": "cyan"
     },
     "Infraestructura y Construcción": {
         "keywords": [
-            "construcción", "operación", "obras temporales", "obras permanentes",
-            "estructuras", "longitud", "suministro"
+            "inmobiliario", "habitacional", "vivienda", "edificio", "loteo",
+            "urbanización", "condominio", "departamentos", "casas"
         ],
         "color": "#92400e",  # marrón
         "color_name": "brown"

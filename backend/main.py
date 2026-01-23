@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 from backend.database import (
     init_db, save_leads, create_run, update_run, get_latest_leads, 
     get_all_leads_for_report, get_recent_runs, get_existing_seia_projects,
@@ -8,9 +9,9 @@ from backend.database import (
     get_all_leads_for_markdown, clear_all_data
 )
 from datetime import datetime
-from backend.auth import AuthMiddleware
+from backend.auth import AuthMiddleware, verify_credentials, create_access_token, verify_token
 from backend.report import generate_report_with_ai, send_email_report
-from backend.config import EMAIL_TO
+from backend.config import EMAIL_TO, JWT_EXPIRATION_HOURS
 from backend.scoring import get_top_proyectos
 from backend.category_rules import CATEGORIAS, CATEGORIA_DEFAULT, CATEGORIA_DEFAULT_COLOR, CATEGORIA_DEFAULT_COLOR_NAME
 import traceback
@@ -18,6 +19,12 @@ import json
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import os
+
+# Modelo para login
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 # Importar scrapers explícitamente
 from scrapers.seia.scraper import run_seia
@@ -40,10 +47,21 @@ executor = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI(title="Master Scraper API")
 
-# Configurar CORS para permitir frontend Next.js
+# Configurar CORS para permitir frontend Next.js (local y producción)
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://controlgastosjero.xyz",
+    "https://www.controlgastosjero.xyz",
+]
+# Permitir origen adicional desde variable de entorno
+extra_origin = os.getenv("CORS_ORIGIN")
+if extra_origin:
+    ALLOWED_ORIGINS.append(extra_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,6 +83,37 @@ def startup_event():
 async def root():
     """Endpoint raíz - información de la API."""
     return {"message": "Master Scraper API", "version": "1.0.0"}
+
+@app.get("/health")
+async def health():
+    """Health check para Docker/monitoreo."""
+    return {"status": "healthy"}
+
+@app.post("/login")
+async def login(request: LoginRequest):
+    """
+    Endpoint de login - retorna JWT token si las credenciales son válidas.
+    """
+    if not verify_credentials(request.username, request.password):
+        raise HTTPException(
+            status_code=401,
+            detail="Usuario o contraseña incorrectos"
+        )
+    
+    token = create_access_token(request.username)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in_hours": JWT_EXPIRATION_HOURS
+    }
+
+@app.get("/verify-token")
+async def verify_token_endpoint():
+    """
+    Verifica si el token actual es válido.
+    Si llega aquí sin error del middleware, el token es válido.
+    """
+    return {"valid": True}
 
 def run_scraper_thread(source: str, run_id: int):
     """Ejecuta el scraper en un thread separado."""

@@ -6,9 +6,11 @@ import DataTable from '@/components/DataTable';
 import LastRuns from '@/components/LastRuns';
 import EstadoChanges from '@/components/EstadoChanges';
 import TopProjects from '@/components/TopProjects';
+import AuthGuard from '@/components/AuthGuard';
+import { logout } from '@/lib/auth';
 import { scrapeAll, generateReport, downloadMarkdownReport, clearAllData } from '@/lib/api';
 
-export default function Home() {
+function Dashboard() {
   const [runningAll, setRunningAll] = useState(false);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [downloadingMD, setDownloadingMD] = useState(false);
@@ -94,6 +96,16 @@ export default function Home() {
                 </p>
               </div>
             </div>
+            {/* Logout Button */}
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-elevated border border-border text-dark-muted hover:text-dark-text hover:bg-border transition-all"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Salir
+            </button>
           </div>
         </div>
       </header>
@@ -272,5 +284,14 @@ export default function Home() {
         </div>
       </footer>
     </div>
+  );
+}
+
+// Envolver Dashboard con AuthGuard para proteger la ruta
+export default function Home() {
+  return (
+    <AuthGuard>
+      <Dashboard />
+    </AuthGuard>
   );
 }
