@@ -4,7 +4,7 @@ Fácilmente modificable para ajustar keywords y umbrales.
 """
 
 # Umbral mínimo para categoría principal
-UMBRAL_CATEGORIA_PRINCIPAL = 0.15
+UMBRAL_CATEGORIA_PRINCIPAL = 0.10
 
 # Umbral mínimo para categorías secundarias
 UMBRAL_CATEGORIA_SECUNDARIA = 0.10

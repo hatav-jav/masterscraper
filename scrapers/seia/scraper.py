@@ -179,31 +179,54 @@ def fetch_descripcion_proyecto(url_ficha: str) -> str:
 
 def _parse_inversion_millones(inversion_str: str):
     """
-    Parsea el formato de inversión del SEIA a millones de dólares.
-    El SEIA usa formato chileno/europeo: punto para miles, coma para decimales.
-    Ejemplos: "10.000" = 10 millones, "1.300" = 1300 millones, "339,594" = 339.594 millones
+    Parsea el formato de inversión del SEIA a millones de dólares (float).
+    El SEIA devuelve valores en MMUS (millones de USD) con formato chileno/europeo.
+    
+    Formato chileno: punto para miles, coma para decimales.
+    
+    Ejemplos de entrada y salida esperada:
+    - "850.000" → 850.0 (punto es separador de miles, 3 dígitos después)
+    - "26.500" → 26.5 (punto es separador de miles, 3 dígitos después)
+    - "1.300,0000" → 1300.0 (punto miles, coma decimal)
+    - "64,1092" → 64.1092 (coma es decimal)
+    - "0,40" → 0.4 (coma es decimal)
+    - "850.000.000" → 850000.0 (múltiples puntos = miles)
     """
     if not inversion_str or not isinstance(inversion_str, str):
         return None
     
     try:
+        import re
+        
+        # Limpiar: remover prefijos/sufijos como "US$", "MM", espacios
         inversion_limpia = inversion_str.strip()
+        inversion_limpia = re.sub(r'[US$\s]', '', inversion_limpia, flags=re.IGNORECASE)
+        inversion_limpia = re.sub(r'MM$', '', inversion_limpia, flags=re.IGNORECASE).strip()
         
-        # El SEIA usa formato chileno: punto para miles, coma para decimales
-        # "10.000" significa 10 (diez millones), no 10000
-        # "1.300" significa 1300 (mil trescientos millones)
-        # "339,594" significa 339.594 millones
+        if not inversion_limpia:
+            return None
         
-        if ',' in inversion_limpia and '.' in inversion_limpia:
-            # Formato completo: "1.300,50" -> 1300.50
+        # Contar puntos y comas
+        num_puntos = inversion_limpia.count('.')
+        tiene_coma = ',' in inversion_limpia
+        
+        if tiene_coma and num_puntos > 0:
+            # Formato europeo completo: "1.300,50" → punto=miles, coma=decimal
             inversion_limpia = inversion_limpia.replace('.', '').replace(',', '.')
-        elif ',' in inversion_limpia:
-            # Solo coma = decimal: "339,594" -> 339.594
+        elif tiene_coma:
+            # Solo coma = decimal: "64,1092" → 64.1092
             inversion_limpia = inversion_limpia.replace(',', '.')
-        elif '.' in inversion_limpia:
-            # Solo punto = separador de miles chileno: "10.000" -> 10
-            # Remover todos los puntos (son separadores de miles)
+        elif num_puntos > 1:
+            # Múltiples puntos = todos son separadores de miles: "850.000.000" → 850000000
             inversion_limpia = inversion_limpia.replace('.', '')
+        elif num_puntos == 1:
+            # Un solo punto: determinar si es miles o decimal
+            # Si tiene exactamente 3 dígitos después del punto → separador de miles
+            partes = inversion_limpia.split('.')
+            if len(partes) == 2 and len(partes[1]) == 3 and partes[1].isdigit():
+                # "850.000" → 850000 (punto es miles)
+                inversion_limpia = inversion_limpia.replace('.', '')
+            # Si no, el punto es decimal (ej: "0.40" → 0.40)
         
         valor = float(inversion_limpia)
         return valor if valor > 0 else None
