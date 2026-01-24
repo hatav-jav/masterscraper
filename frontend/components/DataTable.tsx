@@ -34,14 +34,17 @@ interface Lead {
   created_at?: string;
 }
 
-type SortField = 'inversion' | 'date' | 'created_at' | null;
+type SortField = 'inversion' | 'date' | null;
 type SortOrder = 'asc' | 'desc';
 
-export default function DataTable() {
+interface DataTableProps {
+  filterSource?: string;
+}
+
+export default function DataTable({ filterSource: propFilterSource }: DataTableProps = {}) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
-  const [filterSource, setFilterSource] = useState<string>('all');
   const [filterIndustria, setFilterIndustria] = useState<string>('all');
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
@@ -50,11 +53,11 @@ export default function DataTable() {
     loadLeads();
     const interval = setInterval(loadLeads, 30000);
     return () => clearInterval(interval);
-  }, [sortField, sortOrder]);
+  }, []);
 
   const loadLeads = async () => {
     try {
-      const data = await getLeads(500, sortField || undefined, sortOrder);
+      const data = await getLeads(500);
       setLeads(data.leads || []);
     } catch (error) {
       console.error('Error loading leads:', error);
@@ -82,18 +85,49 @@ export default function DataTable() {
     }
   };
 
+  // Filtrar por source si se especifica en props
+  const sourceFilteredLeads = propFilterSource 
+    ? leads.filter(lead => lead.source.toLowerCase() === propFilterSource.toLowerCase())
+    : leads;
+
   // Obtener industrias únicas para el filtro
   const uniqueIndustrias = Array.from(
-    new Set(leads.map(lead => lead.raw_data?.industria).filter(Boolean))
+    new Set(sourceFilteredLeads.map(lead => lead.raw_data?.industria).filter(Boolean))
   ).sort();
 
-  const filteredLeads = leads.filter(lead => {
-    const matchSource = filterSource === 'all' || lead.source === filterSource;
-    const matchIndustria = filterIndustria === 'all' || lead.raw_data?.industria === filterIndustria;
-    return matchSource && matchIndustria;
+  // Filtrar por industria
+  const filteredLeads = sourceFilteredLeads.filter(lead => {
+    return filterIndustria === 'all' || lead.raw_data?.industria === filterIndustria;
   });
 
-  const uniqueSources = Array.from(new Set(leads.map(lead => lead.source)));
+  // Parsear fecha DD/MM/YYYY a Date
+  const parseDate = (dateStr: string): Date => {
+    if (!dateStr) return new Date(0);
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      // DD/MM/YYYY -> YYYY-MM-DD
+      const [day, month, year] = parts;
+      return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    }
+    return new Date(dateStr);
+  };
+
+  // Ordenar leads
+  const sortedLeads = [...filteredLeads].sort((a, b) => {
+    if (!sortField) return 0;
+    
+    if (sortField === 'inversion') {
+      const aVal = a.raw_data?.inversion_millones ?? 0;
+      const bVal = b.raw_data?.inversion_millones ?? 0;
+      return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+    } else if (sortField === 'date') {
+      const aDate = parseDate(a.date || '');
+      const bDate = parseDate(b.date || '');
+      return sortOrder === 'desc' ? bDate.getTime() - aDate.getTime() : aDate.getTime() - bDate.getTime();
+    }
+    
+    return 0;
+  });
 
   const formatCurrency = (value?: number | string) => {
     if (!value) return 'N/A';
@@ -153,25 +187,10 @@ export default function DataTable() {
       <div className="px-4 py-3 border-b border-border bg-surface-elevated/50">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-dark-muted">{filteredLeads.length} projects</span>
+            <span className="text-sm text-dark-muted">{sortedLeads.length} projects</span>
           </div>
           
           <div className="flex flex-wrap items-center gap-3">
-            {/* Filter by Source */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-dark-dim uppercase tracking-wider">Source:</label>
-              <select
-                value={filterSource}
-                onChange={(e) => setFilterSource(e.target.value)}
-                className="select text-sm py-1"
-              >
-                <option value="all">All</option>
-                {uniqueSources.map(source => (
-                  <option key={source} value={source}>{source}</option>
-                ))}
-              </select>
-            </div>
-
             {/* Filter by Industria */}
             <div className="flex items-center gap-2">
               <label className="text-xs text-dark-dim uppercase tracking-wider">Industry:</label>
@@ -196,9 +215,6 @@ export default function DataTable() {
           <thead>
             <tr className="table-header">
               <th className="w-10 px-3 py-3"></th>
-              <th className="px-3 py-3 text-left text-xs font-semibold text-dark-muted uppercase tracking-wider">
-                Source
-              </th>
               <th className="px-3 py-3 text-left text-xs font-semibold text-dark-muted uppercase tracking-wider">
                 Project
               </th>
@@ -229,9 +245,9 @@ export default function DataTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filteredLeads.length === 0 ? (
+            {sortedLeads.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-dark-muted">
+                <td colSpan={6} className="py-12 text-center text-dark-muted">
                   <div className="flex flex-col items-center gap-2">
                     <svg className="w-12 h-12 text-dark-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -242,7 +258,7 @@ export default function DataTable() {
                 </td>
               </tr>
             ) : (
-              filteredLeads.map((lead, index) => (
+              sortedLeads.map((lead, index) => (
                 <>
                   {/* Main Row */}
                   <tr 
@@ -267,11 +283,6 @@ export default function DataTable() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                         </svg>
                       </button>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className="badge badge-seia">
-                        {lead.source.toUpperCase()}
-                      </span>
                     </td>
                     <td className="px-3 py-3">
                       <span className="font-medium text-dark-text line-clamp-2">
@@ -299,7 +310,7 @@ export default function DataTable() {
                   {/* Expanded Row */}
                   {expandedRows.has(index) && (
                     <tr key={`expanded-${index}`} className="bg-surface-elevated/50">
-                      <td colSpan={7} className="px-3 py-0">
+                      <td colSpan={6} className="px-3 py-0">
                         <div className="py-4 pl-10 pr-4 animate-fadeIn">
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {/* General Info */}

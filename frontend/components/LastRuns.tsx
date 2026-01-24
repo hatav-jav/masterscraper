@@ -12,7 +12,11 @@ interface Run {
   completed_at: string | null;
 }
 
-export default function LastRuns() {
+interface LastRunsProps {
+  filterSource?: string;
+}
+
+export default function LastRuns({ filterSource }: LastRunsProps = {}) {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,12 +24,19 @@ export default function LastRuns() {
     loadRuns();
     const interval = setInterval(loadRuns, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [filterSource]);
 
   const loadRuns = async () => {
     try {
       const data = await getRuns(10);
-      setRuns(data.runs || []);
+      let allRuns = data.runs || [];
+      
+      // Filter by source if specified
+      if (filterSource) {
+        allRuns = allRuns.filter((run: Run) => run.source === filterSource);
+      }
+      
+      setRuns(allRuns);
     } catch (error) {
       console.error('Error loading runs:', error);
     } finally {

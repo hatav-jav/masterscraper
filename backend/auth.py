@@ -65,6 +65,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
     """Middleware para autenticación por JWT o API Key."""
     
     async def dispatch(self, request: Request, call_next):
+        # Permitir requests OPTIONS (CORS preflight)
+        if request.method == "OPTIONS":
+            response = await call_next(request)
+            return response
+        
         # Rutas públicas (sin autenticación)
         public_paths = ["/", "/docs", "/openapi.json", "/redoc", "/login", "/health"]
         
