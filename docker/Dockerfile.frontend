@@ -17,6 +17,9 @@ COPY frontend/ ./
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
+# Next.js puede no crear public; asegurar que exista para el COPY posterior
+RUN mkdir -p public
+
 RUN npm run build
 
 # Runner
