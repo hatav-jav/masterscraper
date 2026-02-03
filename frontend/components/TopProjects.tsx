@@ -83,7 +83,7 @@ export default function TopProjects() {
         <h2 className="text-lg font-semibold mb-4 text-white">Top 20 Proyectos</h2>
         <p className="text-zinc-500 text-sm">No hay proyectos que cumplan los criterios de selección.</p>
         <p className="text-zinc-600 text-xs mt-2">
-          Criterios: Estado válido + Inversión >= USD 25 MM (o >= USD 10 MM para BESS/Minería/Infra. Eléctrica)
+          Criterios: Estado válido + Inversión {'>= '}USD 25 MM (o {'>= '}USD 10 MM para BESS/Minería/Infra. Eléctrica)
         </p>
       </div>
     );
