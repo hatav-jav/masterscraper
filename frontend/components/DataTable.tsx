@@ -48,6 +48,8 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
   const [filterIndustria, setFilterIndustria] = useState<string>('all');
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   useEffect(() => {
     loadLeads();
@@ -55,9 +57,16 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
     return () => clearInterval(interval);
   }, []);
 
+  // Resetear a página 1 cuando cambian filtros o sorting
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterIndustria, sortField, sortOrder]);
+
   const loadLeads = async () => {
     try {
-      const data = await getLeads(500);
+      // Cargar un número grande para tener todos los proyectos disponibles
+      // El backend tiene límite de 1000, pero podemos hacer múltiples requests si es necesario
+      const data = await getLeads(10000);
       setLeads(data.leads || []);
     } catch (error) {
       console.error('Error loading leads:', error);
@@ -129,6 +138,12 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
     return 0;
   });
 
+  // Paginación
+  const totalPages = Math.ceil(sortedLeads.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedLeads = sortedLeads.slice(startIndex, endIndex);
+
   const formatCurrency = (value?: number | string) => {
     if (!value) return 'N/A';
     const num = typeof value === 'string' ? parseFloat(value) : value;
@@ -187,10 +202,31 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
       <div className="px-4 py-3 border-b border-border bg-surface-elevated/50">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-dark-muted">{sortedLeads.length} projects</span>
+            <span className="text-sm text-dark-muted">
+              {sortedLeads.length} projects
+              {sortedLeads.length !== leads.length && ` (${leads.length} total)`}
+            </span>
           </div>
           
           <div className="flex flex-wrap items-center gap-3">
+            {/* Items per page */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-dark-dim uppercase tracking-wider">Per page:</label>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="select text-sm py-1"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
             {/* Filter by Industria */}
             <div className="flex items-center gap-2">
               <label className="text-xs text-dark-dim uppercase tracking-wider">Industry:</label>
@@ -245,7 +281,7 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {sortedLeads.length === 0 ? (
+            {paginatedLeads.length === 0 ? (
               <tr>
                 <td colSpan={6} className="py-12 text-center text-dark-muted">
                   <div className="flex flex-col items-center gap-2">
@@ -258,15 +294,17 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
                 </td>
               </tr>
             ) : (
-              sortedLeads.map((lead, index) => (
+              paginatedLeads.map((lead, localIndex) => {
+                const globalIndex = startIndex + localIndex;
+                return (
                 <>
                   {/* Main Row */}
                   <tr 
-                    key={`row-${index}`}
-                    onClick={() => toggleRow(index)}
+                    key={`row-${globalIndex}`}
+                    onClick={() => toggleRow(globalIndex)}
                     className={`
                       cursor-pointer transition-colors
-                      ${expandedRows.has(index) 
+                      ${expandedRows.has(globalIndex) 
                         ? 'table-row-expanded' 
                         : 'table-row'
                       }
@@ -275,7 +313,7 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
                     <td className="px-3 py-3">
                       <button className="p-1 rounded hover:bg-border transition-transform">
                         <svg 
-                          className={`w-4 h-4 text-dark-muted transition-transform duration-200 ${expandedRows.has(index) ? 'rotate-90' : ''}`} 
+                          className={`w-4 h-4 text-dark-muted transition-transform duration-200 ${expandedRows.has(globalIndex) ? 'rotate-90' : ''}`} 
                           fill="none" 
                           stroke="currentColor" 
                           viewBox="0 0 24 24"
@@ -308,8 +346,8 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
                   </tr>
                   
                   {/* Expanded Row */}
-                  {expandedRows.has(index) && (
-                    <tr key={`expanded-${index}`} className="bg-surface-elevated/50">
+                  {expandedRows.has(globalIndex) && (
+                    <tr key={`expanded-${globalIndex}`} className="bg-surface-elevated/50">
                       <td colSpan={6} className="px-3 py-0">
                         <div className="py-4 pl-10 pr-4 animate-fadeIn">
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -466,11 +504,76 @@ export default function DataTable({ filterSource: propFilterSource }: DataTableP
                     </tr>
                   )}
                 </>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {sortedLeads.length > 0 && (
+        <div className="px-4 py-3 border-t border-border bg-surface-elevated/50">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="text-sm text-dark-muted">
+              Showing {startIndex + 1} to {Math.min(endIndex, sortedLeads.length)} of {sortedLeads.length} projects
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm font-medium hover:bg-zinc-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                Previous
+              </button>
+              
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                        currentPage === pageNum
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm font-medium hover:bg-zinc-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                Next
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

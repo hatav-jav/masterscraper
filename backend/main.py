@@ -346,10 +346,11 @@ async def generate_report():
 
 @app.get("/leads")
 async def get_leads(
-    limit: int = Query(500, ge=1, le=1000)
+    limit: int = Query(10000, ge=1, le=50000)
 ):
     """
     Obtiene los leads recientes.
+    Sin límite práctico (hasta 50,000 para evitar problemas de memoria).
     """
     try:
         leads = get_latest_leads(limit)
